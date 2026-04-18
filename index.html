@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Color Clear</title>
+  <style>
+    :root {
+      --bg: #11141b;
+      --panel: #1a1f2b;
+      --border: #2a3142;
+      --text: #e6ecf5;
+      --muted: #8892a6;
+      --accent: #6aa0ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    .app {
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: 1px;
+      text-align: center;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .game-frame {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .extra-controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    @media (min-width: 640px) {
+      .app {
+        max-width: 500px;
+        padding: 24px;
+        gap: 18px;
+      }
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .field label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .field input {
+      background: #0d1018;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      width: 80px;
+      font-size: 14px;
+    }
+
+    button {
+      background: var(--accent);
+      color: #0d1018;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .status {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .status .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: center;
+      text-align: center;
+      min-width: 0;
+    }
+
+    .status span {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .status b {
+      font-size: 22px;
+      font-weight: 300;
+      color: var(--text);
+      line-height: 1.1;
+    }
+
+    .board-wrap {
+      display: flex;
+      justify-content: center;
+      position: relative;
+      padding: 14px 10px;
+    }
+
+    .power-ups {
+      padding: 14px 16px 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .small-header {
+      text-transform: uppercase;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin: 0 0 10px;
+    }
+
+    .power-ups-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .power-up {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: transparent;
+      border: 2px solid var(--border);
+      color: var(--muted);
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      font-size: 16px;
+    }
+
+    .power-up:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .power-up .badge {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 4px;
+      border-radius: 50%;
+      background: var(--text);
+      color: var(--panel);
+      border: 2px solid var(--panel);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .score-pop {
+      position: absolute;
+      pointer-events: none;
+      font-weight: 700;
+      font-size: 20px;
+      color: #fff;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 2px rgba(0, 0, 0, 0.8);
+      transform: translate(-50%, -50%);
+      animation: scorePop 900ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+      will-change: transform, opacity;
+      white-space: nowrap;
+    }
+
+    @keyframes scorePop {
+      0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.6);
+      }
+
+      15% {
+        opacity: 1;
+        transform: translate(-50%, -70%) scale(1.15);
+      }
+
+      100% {
+        opacity: 0;
+        transform: translate(-50%, -180%) scale(1);
+      }
+    }
+
+    .board {
+      position: relative;
+      user-select: none;
+    }
+
+    .slot {
+      position: absolute;
+      left: 0;
+      top: 0;
+      border-radius: 5px;
+      background: #2a3142;
+      transform: translate(var(--x, 0px), var(--y, 0px));
+      pointer-events: none;
+    }
+
+    .cell {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform: translate(var(--x, 0px), var(--y, 0px)) scale(var(--s, 1));
+      transition: transform 280ms cubic-bezier(0.22, 0.9, 0.3, 1),
+        opacity 180ms ease;
+      cursor: pointer;
+      will-change: transform, opacity;
+    }
+
+    .cell::before {
+      content: '';
+      position: absolute;
+      left: var(--face-x, 0px);
+      top: var(--face-y, 0px);
+      width: var(--face-w, 0px);
+      height: var(--face-h, 0px);
+      background: var(--tile-color, transparent);
+      box-shadow: var(--shadow, none);
+      border-radius: 5px;
+      transition: background 120ms ease, box-shadow 120ms ease;
+    }
+
+    .cell.hover {
+      z-index: 2;
+    }
+
+    .cell.hover::before {
+      background: hsl(from var(--tile-color) h s l / 85%);
+    }
+
+    .cell.clearing {
+      --s: 0.35;
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 180ms ease, opacity 180ms ease;
+    }
+
+    .toast {
+      text-align: center;
+      font-size: 14px;
+      color: var(--muted);
+      min-height: 20px;
+    }
+
+    .toast.win {
+      color: #5ee08c;
+      font-weight: 600;
+    }
+
+    .toast.lose {
+      color: #ff7a7a;
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <h1>Color Clear</h1>
+
+    <div class="game-frame">
+      <header class="status">
+        <div class="stat"><span>Level</span><b id="level">1</b></div>
+        <div class="stat"><span>Score</span><b id="score">0</b></div>
+        <div class="stat"><span>Left</span><b id="remaining">0</b></div>
+        <div class="stat"><span>Moves</span><b id="moves">0</b></div>
+      </header>
+
+      <div class="board-wrap">
+        <div id="board" class="board"></div>
+      </div>
+
+      <footer class="power-ups">
+        <p class="small-header">Power ups</p>
+        <div class="power-ups-row">
+          <button class="power-up" disabled></button>
+          <button class="power-up" disabled></button>
+          <button class="power-up" disabled></button>
+          <button class="power-up" disabled></button>
+        </div>
+      </footer>
+    </div>
+
+    <div class="extra-controls">
+      <button id="new-game">Restart</button>
+      <button id="hint" class="secondary">Hint</button>
+    </div>
+
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
