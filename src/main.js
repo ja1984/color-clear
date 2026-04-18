@@ -1,3 +1,5 @@
+import { haptic } from 'ios-haptics';
+
 // ---------- Palette ----------
 const PALETTE = [
   '#ff5b6e', // red
@@ -23,7 +25,7 @@ let hoverGroup = new Set();
 let gameOver = false;
 let busy = false;
 
-const STARTING_POWER_UPS = { rotateCW: 0, rotateCCW: 0, clearRow: 0, clearCol: 0, bomb: 0, hint: 2 };
+const STARTING_POWER_UPS = { rotateCW: 0, rotateCCW: 0, clearRow: 0, clearCol: 0, bomb: 0, hint: 3 };
 let powerUps = { ...STARTING_POWER_UPS };
 let activePowerUp = null;
 
@@ -65,35 +67,12 @@ const movesEl = document.getElementById('moves');
 const levelEl = document.getElementById('level');
 
 // ---------- Level curve ----------
-// Gentle ramp: small boards + few colors early, grow gradually.
+// Grid stays at 10x10; difficulty ramps via number of colors.
 function levelConfig(lvl) {
-  const steps = [
-    { rows: 4,  cols: 4,  colors: 2 }, // 1
-    { rows: 5,  cols: 5,  colors: 2 }, // 2
-    { rows: 5,  cols: 5,  colors: 3 }, // 3
-    { rows: 6,  cols: 6,  colors: 3 }, // 4
-    { rows: 7,  cols: 6,  colors: 3 }, // 5
-    { rows: 7,  cols: 7,  colors: 3 }, // 6
-    { rows: 7,  cols: 7,  colors: 4 }, // 7
-    { rows: 8,  cols: 8,  colors: 4 }, // 8
-    { rows: 9,  cols: 8,  colors: 4 }, // 9
-    { rows: 9,  cols: 9,  colors: 4 }, // 10
-    { rows: 10, cols: 9,  colors: 4 }, // 11
-    { rows: 10, cols: 10, colors: 4 }, // 12
-    { rows: 10, cols: 10, colors: 5 }, // 13
-    { rows: 11, cols: 10, colors: 5 }, // 14
-    { rows: 12, cols: 10, colors: 5 }, // 15
-    { rows: 12, cols: 12, colors: 5 }, // 16
-    { rows: 12, cols: 12, colors: 6 }, // 17
-  ];
-  if (lvl <= steps.length) return steps[lvl - 1];
-  // Beyond the table, keep nudging upward.
-  const extra = lvl - steps.length;
-  return {
-    rows: Math.min(16, 12 + Math.floor(extra / 2)),
-    cols: Math.min(16, 12 + Math.floor((extra + 1) / 2)),
-    colors: Math.min(PALETTE.length, 6 + Math.floor(extra / 3)),
-  };
+  const size = Math.min(12, 6 + 2 * Math.floor((lvl - 1) / 4));
+  const colorSteps = [2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6];
+  const colors = colorSteps[Math.min(lvl - 1, colorSteps.length - 1)] ?? PALETTE.length;
+  return { rows: size, cols: size, colors: Math.min(PALETTE.length, colors) };
 }
 
 // ---------- Grid helpers ----------
@@ -227,12 +206,11 @@ function randomGrid(R, C, K) {
   return g;
 }
 
-function fragmentedGrid(R, C, K) {
+function fragmentedGrid(R, C, K, matchChance = 0.35) {
   const g = Array.from({ length: R }, () => new Array(C).fill(-1));
-  const MATCH_CHANCE = 0.35;
   for (let r = 0; r < R; r++) {
     for (let c = 0; c < C; c++) {
-      if (Math.random() < MATCH_CHANCE) {
+      if (Math.random() < matchChance) {
         g[r][c] = Math.floor(Math.random() * K);
         continue;
       }
@@ -259,9 +237,9 @@ function fragmentedGrid(R, C, K) {
   return g;
 }
 
-function generateSolvable(R, C, K) {
+function generateSolvable(R, C, K, matchChance = 0.35) {
   for (let attempt = 0; attempt < 12; attempt++) {
-    const g = fragmentedGrid(R, C, K);
+    const g = fragmentedGrid(R, C, K, matchChance);
     const res = isSolvable(cloneGrid(g), 15000);
     if (res === true) return g;
   }
@@ -481,6 +459,7 @@ function resizeTiles() {
 async function doRotate(key) {
   if (busy || gameOver) return;
   if (powerUps[key] <= 0) return;
+  haptic.confirm();
   busy = true;
   activePowerUp = null;
   hoverGroup = new Set();
@@ -526,6 +505,7 @@ async function doRotate(key) {
 
 async function clearTargets(targets, powerUpKey) {
   if (!targets.length) return;
+  haptic.confirm();
   busy = true;
   activePowerUp = null;
   hoverGroup = new Set();
@@ -694,6 +674,7 @@ boardEl.addEventListener('click', async (e) => {
   const group = findGroup(grid, t.r, t.c);
   if (group.length < 2) return;
 
+  haptic();
   busy = true;
   hoverGroup = new Set();
   updateHoverClasses();
@@ -713,7 +694,7 @@ boardEl.addEventListener('click', async (e) => {
   for (const [gr, gc] of group) {
     const id = tileIds[gr][gc];
     if (id > 0) {
-      if (awardPowerUpFromTile(id)) awarded = true;
+      if (awardPowerUpFromTile(id)) { awarded = true; haptic.confirm(); }
       const tile = tiles.get(id);
       if (tile) tile.el.remove();
       tiles.delete(id);
@@ -741,6 +722,7 @@ function checkEnd() {
     gameOver = true;
     score += 100;
     scoreEl.textContent = score;
+    haptic.confirm();
     const nextLevel = level + 1;
     setTimeout(() => startLevel(nextLevel, /*keepScore*/ true), 300);
     return;
@@ -748,6 +730,7 @@ function checkEnd() {
   const groups = findAllGroups(grid);
   if (groups.length === 0) {
     gameOver = true;
+    haptic.error();
     showGameOver();
   }
 }
@@ -773,7 +756,9 @@ function startLevel(lvl, keepScore = false) {
   rows = cfg.rows; cols = cfg.cols; numColors = cfg.colors;
 
   setTimeout(() => {
-    grid = generateSolvable(rows, cols, numColors);
+    // Bigger clusters on early levels, more fragmented later.
+    const matchChance = Math.max(0.35, 0.7 - (level - 1) * 0.04);
+    grid = generateSolvable(rows, cols, numColors, matchChance);
     if (!keepScore) score = 0;
     moves = 0;
     gameOver = false;
@@ -802,6 +787,7 @@ function togglePowerUp(key) {
   if (busy || gameOver) return;
   if (powerUps[key] <= 0) return;
   activePowerUp = (activePowerUp === key) ? null : key;
+  haptic();
   updatePowerUpBadges();
 }
 document.getElementById('pu-bomb').addEventListener('click', () => togglePowerUp('bomb'));
