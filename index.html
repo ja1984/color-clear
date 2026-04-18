@@ -4,6 +4,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="https://cdn.hugeicons.com/font/hgi-stroke-rounded.css" />
+
   <title>Color Clear</title>
   <style>
     :root {
@@ -62,12 +64,55 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      position: relative;
     }
 
-    .extra-controls {
-      display: flex;
-      gap: 10px;
+    .game-over-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(17, 20, 27, 0.85);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
       justify-content: center;
+      z-index: 10;
+      padding: 16px;
+    }
+
+    .game-over-overlay.show {
+      display: flex;
+    }
+
+    .game-over-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 28px;
+      text-align: center;
+      min-width: 240px;
+    }
+
+    .game-over-card h2 {
+      margin: 0 0 20px;
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .game-over-stats {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+
+    .go-restart-btn {
+      width: 100%;
+      padding: 10px 16px;
+      font-size: 14px;
     }
 
     @media (min-width: 640px) {
@@ -176,6 +221,13 @@
 
     .power-ups-row {
       display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .power-up-slots {
+      display: flex;
       gap: 12px;
     }
 
@@ -192,12 +244,29 @@
       justify-content: center;
       cursor: pointer;
       position: relative;
-      font-size: 16px;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .power-up:hover:not(.active):not(:disabled) {
+      color: var(--text);
+      border-color: var(--text);
     }
 
     .power-up:disabled {
       opacity: 0.4;
       cursor: default;
+    }
+
+    .power-up.hint {
+      color: var(--text);
+      border-color: var(--text);
+    }
+
+    .power-up.active {
+      background: var(--text);
+      color: var(--panel);
+      border-color: var(--text);
     }
 
     .power-up .badge {
@@ -296,6 +365,34 @@
       background: hsl(from var(--tile-color) h s l / 85%);
     }
 
+    .board.line-mode .cell.hover::before {
+      background: color-mix(in srgb, var(--tile-color), white 40%);
+    }
+
+    @keyframes pulseHint {
+      0%, 100% { background: var(--tile-color); }
+      50%      { background: color-mix(in srgb, var(--tile-color), white 40%); }
+    }
+
+    .cell.pulse::before {
+      animation: pulseHint 600ms ease-in-out 3;
+    }
+
+    .tile-powerup {
+      position: absolute;
+      left: var(--face-x, 0px);
+      top: var(--face-y, 0px);
+      width: var(--face-w, 0px);
+      height: var(--face-h, 0px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.95);
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+      pointer-events: none;
+      z-index: 1;
+    }
+
     .cell.clearing {
       --s: 0.35;
       opacity: 0;
@@ -303,22 +400,6 @@
       transition: transform 180ms ease, opacity 180ms ease;
     }
 
-    .toast {
-      text-align: center;
-      font-size: 14px;
-      color: var(--muted);
-      min-height: 20px;
-    }
-
-    .toast.win {
-      color: #5ee08c;
-      font-weight: 600;
-    }
-
-    .toast.lose {
-      color: #ff7a7a;
-      font-weight: 600;
-    }
   </style>
 </head>
 
@@ -341,20 +422,47 @@
       <footer class="power-ups">
         <p class="small-header">Power ups</p>
         <div class="power-ups-row">
-          <button class="power-up" disabled></button>
-          <button class="power-up" disabled></button>
-          <button class="power-up" disabled></button>
-          <button class="power-up" disabled></button>
+          <div class="power-up-slots">
+            <button class="power-up" id="pu-rotate-cw" aria-label="Rotate clockwise">
+              <i class="hgi hgi-stroke hgi-rounded hgi-rotate-clockwise"></i>
+              <span class="badge">0</span>
+            </button>
+            <button class="power-up" id="pu-rotate-ccw" aria-label="Rotate counter-clockwise">
+              <i class="hgi hgi-stroke hgi-rounded hgi-rotate-02"></i>
+              <span class="badge">0</span>
+            </button>
+            <button class="power-up" id="pu-clear-row" aria-label="Clear row">
+              <i class="hgi hgi-stroke hgi-rounded hgi-arrow-horizontal"></i>
+              <span class="badge">0</span>
+            </button>
+            <button class="power-up" id="pu-clear-col" aria-label="Clear column">
+              <i class="hgi hgi-stroke hgi-rounded hgi-arrow-vertical"></i>
+              <span class="badge">0</span>
+            </button>
+            <button class="power-up" id="pu-bomb" aria-label="Bomb same color">
+              <i class="hgi hgi-stroke hgi-rounded hgi-bomb"></i>
+              <span class="badge">0</span>
+            </button>
+          </div>
+          <button id="hint" class="power-up hint" aria-label="Hint">
+            <i class="hgi hgi-stroke hgi-rounded hgi-idea-01"></i>
+            <span class="badge">0</span>
+          </button>
         </div>
       </footer>
+
+      <div id="game-over" class="game-over-overlay">
+        <div class="game-over-card">
+          <h2>No more moves</h2>
+          <div class="game-over-stats">
+            <div class="stat"><span>Level</span><b id="go-level">1</b></div>
+            <div class="stat"><span>Score</span><b id="go-score">0</b></div>
+          </div>
+          <button id="go-restart" class="go-restart-btn">Restart</button>
+        </div>
+      </div>
     </div>
 
-    <div class="extra-controls">
-      <button id="new-game">Restart</button>
-      <button id="hint" class="secondary">Hint</button>
-    </div>
-
-    <div id="toast" class="toast"></div>
   </div>
 
   <script type="module" src="/src/main.js"></script>

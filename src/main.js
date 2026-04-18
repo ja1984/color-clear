@@ -23,6 +23,21 @@ let hoverGroup = new Set();
 let gameOver = false;
 let busy = false;
 
+const STARTING_POWER_UPS = { rotateCW: 0, rotateCCW: 0, clearRow: 0, clearCol: 0, bomb: 0, hint: 2 };
+let powerUps = { ...STARTING_POWER_UPS };
+let activePowerUp = null;
+
+const POWER_UP_ICONS = {
+  rotateCW: 'hgi-rotate-clockwise',
+  rotateCCW: 'hgi-rotate-02',
+  clearRow: 'hgi-arrow-horizontal',
+  clearCol: 'hgi-arrow-vertical',
+  bomb: 'hgi-bomb',
+  hint: 'hgi-idea-01',
+};
+const POWER_UP_KEYS = Object.keys(POWER_UP_ICONS);
+let tilePowerUps = new Map(); // tileId -> powerUpKey
+
 const GAP_X = 7;
 const GAP_Y = 11;
 const PADDING = 6;
@@ -48,7 +63,6 @@ const scoreEl = document.getElementById('score');
 const remainingEl = document.getElementById('remaining');
 const movesEl = document.getElementById('moves');
 const levelEl = document.getElementById('level');
-const toastEl = document.getElementById('toast');
 
 // ---------- Level curve ----------
 // Gentle ramp: small boards + few colors early, grow gradually.
@@ -360,6 +374,7 @@ function setupBoard() {
       el.className = 'cell';
       el.style.width = (cellSize + GAP_X) + 'px';
       el.style.height = (cellSize + GAP_Y) + 'px';
+      el.style.fontSize = Math.round(cellSize * 0.55) + 'px';
       el.style.setProperty('--face-x', (GAP_X / 2) + 'px');
       el.style.setProperty('--face-y', (GAP_Y / 2) + 'px');
       el.style.setProperty('--face-w', cellSize + 'px');
@@ -393,6 +408,186 @@ function updateHoverClasses() {
     const id = tileIds[r] && tileIds[r][c];
     if (id && id > 0) tiles.get(id).el.classList.add('hover');
   }
+}
+
+function updatePowerUpBadges() {
+  const map = {
+    rotateCW: document.getElementById('pu-rotate-cw'),
+    rotateCCW: document.getElementById('pu-rotate-ccw'),
+    clearRow: document.getElementById('pu-clear-row'),
+    clearCol: document.getElementById('pu-clear-col'),
+    bomb: document.getElementById('pu-bomb'),
+    hint: document.getElementById('hint'),
+  };
+  for (const key of Object.keys(map)) {
+    const btn = map[key];
+    if (!btn) continue;
+    const amount = powerUps[key];
+    const badge = btn.querySelector('.badge');
+    if (badge) badge.textContent = amount;
+    btn.disabled = amount <= 0 || busy || gameOver;
+    btn.classList.toggle('active', activePowerUp === key);
+  }
+  boardEl.classList.toggle('line-mode', activePowerUp === 'clearRow' || activePowerUp === 'clearCol');
+}
+
+function awardPowerUpFromTile(tileId) {
+  const key = tilePowerUps.get(tileId);
+  if (!key) return null;
+  powerUps[key] += 1;
+  tilePowerUps.delete(tileId);
+  return key;
+}
+
+function spawnLevelPowerUp() {
+  const ids = Array.from(tiles.keys());
+  if (!ids.length) return;
+  const tileId = ids[Math.floor(Math.random() * ids.length)];
+  const key = POWER_UP_KEYS[Math.floor(Math.random() * POWER_UP_KEYS.length)];
+  tilePowerUps.set(tileId, key);
+  const tile = tiles.get(tileId);
+  if (!tile) return;
+  const icon = document.createElement('i');
+  icon.className = `hgi hgi-stroke hgi-rounded ${POWER_UP_ICONS[key]} tile-powerup`;
+  tile.el.appendChild(icon);
+}
+
+function rebuildSlots() {
+  for (const s of boardEl.querySelectorAll('.slot')) s.remove();
+  const frag = document.createDocumentFragment();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      slot.style.width = cellSize + 'px';
+      slot.style.height = cellSize + 'px';
+      positionTile(slot, r, c);
+      frag.appendChild(slot);
+    }
+  }
+  boardEl.prepend(frag);
+}
+
+function resizeTiles() {
+  for (const { el } of tiles.values()) {
+    el.style.width = (cellSize + GAP_X) + 'px';
+    el.style.height = (cellSize + GAP_Y) + 'px';
+    el.style.fontSize = Math.round(cellSize * 0.55) + 'px';
+    el.style.setProperty('--face-w', cellSize + 'px');
+    el.style.setProperty('--face-h', cellSize + 'px');
+  }
+}
+
+async function doRotate(key) {
+  if (busy || gameOver) return;
+  if (powerUps[key] <= 0) return;
+  busy = true;
+  activePowerUp = null;
+  hoverGroup = new Set();
+  updateHoverClasses();
+
+  // The CW button rotates CCW visually (per user preference), and vice versa.
+  const cw = key === 'rotateCCW';
+  const R = rows, C = cols;
+  const nR = C, nC = R;
+  const ng = Array.from({ length: nR }, () => new Array(nC).fill(-1));
+  const nti = Array.from({ length: nR }, () => new Array(nC).fill(-1));
+  for (let r = 0; r < R; r++) {
+    for (let c = 0; c < C; c++) {
+      const nr = cw ? c : (C - 1 - c);
+      const nc = cw ? (R - 1 - r) : r;
+      ng[nr][nc] = grid[r][c];
+      nti[nr][nc] = tileIds[r][c];
+    }
+  }
+  grid = ng;
+  tileIds = nti;
+  rows = nR;
+  cols = nC;
+
+  applyGravity(grid, tileIds);
+
+  computeCellSize();
+  setBoardSize();
+  rebuildSlots();
+  resizeTiles();
+  layoutTiles();
+
+  powerUps[key] -= 1;
+  moves++;
+  updateStatus();
+  updatePowerUpBadges();
+
+  await wait(SLIDE_MS);
+  busy = false;
+  updatePowerUpBadges();
+  checkEnd();
+}
+
+async function clearTargets(targets, powerUpKey) {
+  if (!targets.length) return;
+  busy = true;
+  activePowerUp = null;
+  hoverGroup = new Set();
+  updateHoverClasses();
+
+  const gained = targets.length * (targets.length - 1);
+  spawnScorePop(targets, gained);
+
+  for (const [r, c] of targets) {
+    const id = tileIds[r][c];
+    if (id > 0) tiles.get(id).el.classList.add('clearing');
+  }
+  await wait(FADE_MS);
+
+  for (const [r, c] of targets) {
+    const id = tileIds[r][c];
+    if (id > 0) {
+      awardPowerUpFromTile(id);
+      const tile = tiles.get(id);
+      if (tile) tile.el.remove();
+      tiles.delete(id);
+    }
+    grid[r][c] = -1;
+    tileIds[r][c] = -1;
+  }
+
+  applyGravity(grid, tileIds);
+  layoutTiles();
+  score += gained;
+  powerUps[powerUpKey] -= 1;
+  moves++;
+  updateStatus();
+  updatePowerUpBadges();
+
+  await wait(SLIDE_MS);
+  busy = false;
+  updatePowerUpBadges();
+  checkEnd();
+}
+
+async function explodeBomb(r, c) {
+  const color = grid[r][c];
+  if (color < 0) return;
+  const targets = [];
+  for (let rr = 0; rr < rows; rr++)
+    for (let cc = 0; cc < cols; cc++)
+      if (grid[rr][cc] === color) targets.push([rr, cc]);
+  await clearTargets(targets, 'bomb');
+}
+
+async function clearRow(r) {
+  const targets = [];
+  for (let cc = 0; cc < cols; cc++)
+    if (grid[r][cc] >= 0) targets.push([r, cc]);
+  await clearTargets(targets, 'clearRow');
+}
+
+async function clearCol(c) {
+  const targets = [];
+  for (let rr = 0; rr < rows; rr++)
+    if (grid[rr][c] >= 0) targets.push([rr, c]);
+  await clearTargets(targets, 'clearCol');
 }
 
 function updateStatus() {
@@ -432,11 +627,6 @@ function spawnScorePop(group, points) {
   pop.addEventListener('animationend', () => pop.remove());
 }
 
-function setToast(msg, cls = '') {
-  toastEl.className = 'toast ' + cls;
-  toastEl.textContent = msg;
-}
-
 // ---------- Interaction ----------
 function tileFromEvent(e) {
   const target = e.target.closest('.cell');
@@ -450,9 +640,21 @@ boardEl.addEventListener('mousemove', (e) => {
   const t = tileFromEvent(e);
   if (!t) return clearHover();
   if (grid[t.r][t.c] < 0) return clearHover();
-  const group = findGroup(grid, t.r, t.c);
+
   const next = new Set();
-  if (group.length >= 2) group.forEach(([gr, gc]) => next.add(gr * cols + gc));
+  if (activePowerUp === 'clearRow') {
+    for (let cc = 0; cc < cols; cc++) {
+      if (tileIds[t.r][cc] > 0) next.add(t.r * cols + cc);
+    }
+  } else if (activePowerUp === 'clearCol') {
+    for (let rr = 0; rr < rows; rr++) {
+      if (tileIds[rr][t.c] > 0) next.add(rr * cols + t.c);
+    }
+  } else {
+    const group = findGroup(grid, t.r, t.c);
+    if (group.length >= 2) group.forEach(([gr, gc]) => next.add(gr * cols + gc));
+  }
+
   if (!sameSet(next, hoverGroup)) {
     hoverGroup = next;
     updateHoverClasses();
@@ -477,6 +679,18 @@ boardEl.addEventListener('click', async (e) => {
   const t = tileFromEvent(e);
   if (!t) return;
   if (grid[t.r][t.c] < 0) return;
+  if (activePowerUp === 'bomb') {
+    await explodeBomb(t.r, t.c);
+    return;
+  }
+  if (activePowerUp === 'clearRow') {
+    await clearRow(t.r);
+    return;
+  }
+  if (activePowerUp === 'clearCol') {
+    await clearCol(t.c);
+    return;
+  }
   const group = findGroup(grid, t.r, t.c);
   if (group.length < 2) return;
 
@@ -495,9 +709,11 @@ boardEl.addEventListener('click', async (e) => {
   await wait(FADE_MS);
 
   // Remove from data and DOM.
+  let awarded = false;
   for (const [gr, gc] of group) {
     const id = tileIds[gr][gc];
     if (id > 0) {
+      if (awardPowerUpFromTile(id)) awarded = true;
       const tile = tiles.get(id);
       if (tile) tile.el.remove();
       tiles.delete(id);
@@ -512,9 +728,11 @@ boardEl.addEventListener('click', async (e) => {
   score += gained;
   moves++;
   updateStatus();
+  if (awarded) updatePowerUpBadges();
 
   await wait(SLIDE_MS);
   busy = false;
+  updatePowerUpBadges();
   checkEnd();
 });
 
@@ -523,16 +741,29 @@ function checkEnd() {
     gameOver = true;
     score += 100;
     scoreEl.textContent = score;
-    setToast(`Cleared level ${level}! +100 bonus — next up…`, 'win');
     const nextLevel = level + 1;
-    setTimeout(() => startLevel(nextLevel, /*keepScore*/ true), 1200);
+    setTimeout(() => startLevel(nextLevel, /*keepScore*/ true), 300);
     return;
   }
   const groups = findAllGroups(grid);
   if (groups.length === 0) {
     gameOver = true;
-    setToast(`No more moves on level ${level}. Game over.`, 'lose');
+    showGameOver();
   }
+}
+
+function showGameOver() {
+  const overlay = document.getElementById('game-over');
+  const goLevel = document.getElementById('go-level');
+  const goScore = document.getElementById('go-score');
+  if (goLevel) goLevel.textContent = level;
+  if (goScore) goScore.textContent = score;
+  if (overlay) overlay.classList.add('show');
+}
+
+function hideGameOver() {
+  const overlay = document.getElementById('game-over');
+  if (overlay) overlay.classList.remove('show');
 }
 
 // ---------- New game / levels ----------
@@ -541,7 +772,6 @@ function startLevel(lvl, keepScore = false) {
   const cfg = levelConfig(level);
   rows = cfg.rows; cols = cfg.cols; numColors = cfg.colors;
 
-  setToast(`Level ${level} — generating board…`);
   setTimeout(() => {
     grid = generateSolvable(rows, cols, numColors);
     if (!keepScore) score = 0;
@@ -549,24 +779,55 @@ function startLevel(lvl, keepScore = false) {
     gameOver = false;
     busy = false;
     hoverGroup = new Set();
+    tilePowerUps.clear();
     setupBoard();
+    if (level % 2 === 1) spawnLevelPowerUp();
     updateStatus();
-    setToast(`Level ${level}: ${rows}×${cols}, ${numColors} colors`);
+    updatePowerUpBadges();
   }, 20);
 }
 
 function newGame() {
+  powerUps = { ...STARTING_POWER_UPS };
+  activePowerUp = null;
+  tilePowerUps.clear();
+  hideGameOver();
   startLevel(1, false);
 }
 
-document.getElementById('new-game').addEventListener('click', newGame);
+document.getElementById('go-restart').addEventListener('click', newGame);
+document.getElementById('pu-rotate-cw').addEventListener('click', () => doRotate('rotateCW'));
+document.getElementById('pu-rotate-ccw').addEventListener('click', () => doRotate('rotateCCW'));
+function togglePowerUp(key) {
+  if (busy || gameOver) return;
+  if (powerUps[key] <= 0) return;
+  activePowerUp = (activePowerUp === key) ? null : key;
+  updatePowerUpBadges();
+}
+document.getElementById('pu-bomb').addEventListener('click', () => togglePowerUp('bomb'));
+document.getElementById('pu-clear-row').addEventListener('click', () => togglePowerUp('clearRow'));
+document.getElementById('pu-clear-col').addEventListener('click', () => togglePowerUp('clearCol'));
 document.getElementById('hint').addEventListener('click', () => {
-  if (busy) return;
+  if (busy || gameOver) return;
+  if (powerUps.hint <= 0) return;
   const groups = findAllGroups(grid);
-  if (groups.length === 0) { setToast('No groups available.'); return; }
+  if (groups.length === 0) return;
+  powerUps.hint -= 1;
+  updatePowerUpBadges();
   groups.sort((a, b) => b.length - a.length);
-  hoverGroup = new Set(groups[0].map(([r, c]) => r * cols + c));
-  updateHoverClasses();
+  const group = groups[0];
+
+  const pulsed = [];
+  for (const [r, c] of group) {
+    const id = tileIds[r][c];
+    if (id > 0) {
+      const t = tiles.get(id);
+      if (t) { t.el.classList.add('pulse'); pulsed.push(t.el); }
+    }
+  }
+  setTimeout(() => {
+    for (const el of pulsed) el.classList.remove('pulse');
+  }, 1800);
 });
 
 window.addEventListener('resize', () => {
@@ -584,12 +845,7 @@ window.addEventListener('resize', () => {
       positionTile(slot, r, c);
     }
   }
-  for (const { el } of tiles.values()) {
-    el.style.width = (cellSize + GAP_X) + 'px';
-    el.style.height = (cellSize + GAP_Y) + 'px';
-    el.style.setProperty('--face-w', cellSize + 'px');
-    el.style.setProperty('--face-h', cellSize + 'px');
-  }
+  resizeTiles();
   layoutTiles();
 });
 
