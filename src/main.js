@@ -1,4 +1,121 @@
-import { haptic } from 'ios-haptics';
+// ---------- Haptics ----------
+// iOS Safari 17.4+ plays a haptic when <input type="checkbox" switch> toggles.
+// Keep a real, rendered <label> off-screen — iOS ignores display:none/opacity:0.
+// Clicking the label toggles the inner input (iOS's native gesture path) and
+// fires the haptic. Android also uses navigator.vibrate.
+const hapticLabel = (() => {
+  if (typeof document === 'undefined' || !document.body) return null;
+  const label = document.createElement('label');
+  label.setAttribute('aria-hidden', 'true');
+  label.style.cssText =
+    'position:absolute;top:-9999px;left:-9999px;pointer-events:none;';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.setAttribute('switch', '');
+  label.appendChild(input);
+  document.body.appendChild(label);
+  return label;
+})();
+
+function tap() {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    try { navigator.vibrate(15); } catch {}
+  }
+  if (hapticLabel) {
+    try { hapticLabel.click(); } catch {}
+  }
+}
+
+const haptic = Object.assign(tap, {
+  confirm() {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([15, 40, 15]); } catch {}
+    }
+    tap();
+    setTimeout(tap, 120);
+  },
+  error() {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([15, 40, 15, 40, 15]); } catch {}
+    }
+    tap();
+    setTimeout(tap, 120);
+    setTimeout(tap, 240);
+  },
+});
+
+if (typeof window !== 'undefined') {
+  window.debugHaptic = (kind = 'tap') => haptic[kind] ? haptic[kind]() : haptic();
+}
+
+// ---------- Sound ----------
+// Two paths: Web Audio (fast, <10ms) with an HTMLAudioElement fallback that
+// always plays even if the AudioContext hasn't been unlocked/decoded yet.
+const AudioCtor = typeof window !== 'undefined'
+  ? (window.AudioContext || window.webkitAudioContext)
+  : null;
+
+let audioCtx = null;
+let clickBuffer = null;
+const CLICK_POOL_SIZE = 4;
+const clickPool = [];
+let clickPoolIdx = 0;
+
+if (typeof Audio !== 'undefined') {
+  for (let i = 0; i < CLICK_POOL_SIZE; i++) {
+    const a = new Audio('/click.mp3');
+    a.preload = 'auto';
+    a.volume = 0.6;
+    try { a.load(); } catch {}
+    clickPool.push(a);
+  }
+}
+
+function initWebAudio() {
+  if (audioCtx || !AudioCtor) return;
+  try {
+    audioCtx = new AudioCtor();
+    fetch('/click.mp3')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => audioCtx.decodeAudioData(buf))
+      .then((decoded) => { clickBuffer = decoded; })
+      .catch(() => {});
+  } catch {}
+}
+
+if (typeof document !== 'undefined') {
+  const unlock = () => {
+    initWebAudio();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+  };
+  document.addEventListener('pointerdown', unlock, { passive: true });
+  document.addEventListener('touchstart', unlock, { passive: true });
+  document.addEventListener('click', unlock);
+}
+
+function playClick() {
+  if (audioCtx && clickBuffer && audioCtx.state === 'running') {
+    try {
+      const src = audioCtx.createBufferSource();
+      src.buffer = clickBuffer;
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.6;
+      src.connect(gain);
+      gain.connect(audioCtx.destination);
+      src.start(0);
+      return;
+    } catch {}
+  }
+  if (!clickPool.length) return;
+  const a = clickPool[clickPoolIdx];
+  clickPoolIdx = (clickPoolIdx + 1) % clickPool.length;
+  try {
+    a.currentTime = 0;
+    a.play().catch(() => {});
+  } catch {}
+}
 
 // ---------- Palette ----------
 const PALETTE = [
@@ -619,6 +736,7 @@ async function doRotate(key) {
 async function clearTargets(targets, powerUpKey) {
   if (!targets.length) return;
   haptic.confirm();
+  playClick();
   pushSnapshot();
   busy = true;
   activePowerUp = null;
@@ -791,6 +909,7 @@ boardEl.addEventListener('click', async (e) => {
   if (group.length < 2) return;
 
   haptic();
+  playClick();
   pushSnapshot();
   busy = true;
   hoverGroup = new Set();
@@ -874,8 +993,11 @@ function showGameOver() {
     powerUps.clearCol +
     powerUps.bomb +
     powerUps.undo;
-  if (continueBtn) continueBtn.hidden = usable <= 0;
-  if (restartBtn) restartBtn.classList.toggle('secondary', usable > 0);
+  if (continueBtn) {
+    continueBtn.hidden = usable <= 0;
+    continueBtn.classList.add('secondary');
+  }
+  if (restartBtn) restartBtn.classList.remove('secondary');
 
   if (overlay) overlay.classList.add('show');
   openLeaderboard();
