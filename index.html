@@ -546,10 +546,14 @@
       top: var(--face-y, 0px);
       width: var(--face-w, 0px);
       height: var(--face-h, 0px);
-      background: var(--tile-color, transparent);
+      background-color: var(--tile-color, transparent);
+      background-position: right 300%;
       box-shadow: var(--shadow, none);
       border-radius: 5px;
-      transition: background 120ms ease, box-shadow 120ms ease;
+      transition:
+        background-color 120ms ease,
+        background-position 480ms cubic-bezier(0.22, 0.9, 0.3, 1),
+        box-shadow 120ms ease;
     }
 
     .cell.hover {
@@ -557,22 +561,22 @@
     }
 
     .cell.hover::before {
-      background: hsl(from var(--tile-color) h s l / 85%);
+      background-color: hsl(from var(--tile-color) h s l / 85%);
     }
 
     .board.line-mode .cell.hover::before {
-      background: color-mix(in srgb, var(--tile-color), white 40%);
+      background-color: color-mix(in srgb, var(--tile-color), white 40%);
     }
 
     @keyframes pulseHint {
 
       0%,
       100% {
-        background: var(--tile-color);
+        background-color: var(--tile-color);
       }
 
       50% {
-        background: color-mix(in srgb, var(--tile-color), white 40%);
+        background-color: color-mix(in srgb, var(--tile-color), white 40%);
       }
     }
 
@@ -621,18 +625,14 @@
       transition: transform 180ms ease, opacity 180ms ease;
     }
 
-    .cell[data-andrea-match]::before {
+    .board.andrea-mode .cell::before {
       background-image: url('/68005db274c6f20b.png');
       background-size: 60%;
-      background-position: right bottom;
-      background-color: var(--tile-color);
       background-repeat: no-repeat;
-      animation: andreaSlideIn 520ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
     }
 
-    @keyframes andreaSlideIn {
-      from { background-position: right 300%; }
-      to { background-position: right bottom; }
+    .board.andrea-mode .cell:hover::before {
+      background-position: right bottom;
     }
   </style>
 </head>
