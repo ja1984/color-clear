@@ -2,10 +2,11 @@ import { haptic } from 'ios-haptics';
 
 // ---------- Palette ----------
 const PALETTE = [
-  '#ff5b6e', // red
+  '#FF69B4', // pink
   '#5ec8ff', // blue
   '#5ee08c', // green
   '#ffd166', // yellow
+  '#ff5b6e', // red
   '#c38bff', // purple
   '#ff9b5e', // orange
   '#7aeaea', // teal
@@ -39,7 +40,8 @@ const POWER_UP_ICONS = {
   hint: 'hgi-idea-01',
 };
 const POWER_UP_KEYS = Object.keys(POWER_UP_ICONS);
-let tilePowerUps = new Map(); // tileId -> powerUpKey
+const POWER_UP_TILE_TTL = 4;
+let tilePowerUps = new Map(); // tileId -> { key, remaining }
 
 const UNDO_STACK_MAX = 50;
 let undoStack = [];
@@ -422,11 +424,24 @@ function updatePowerUpBadges() {
 }
 
 function awardPowerUpFromTile(tileId) {
-  const key = tilePowerUps.get(tileId);
-  if (!key) return null;
-  powerUps[key] += 1;
+  const info = tilePowerUps.get(tileId);
+  if (!info) return null;
+  powerUps[info.key] += 1;
   tilePowerUps.delete(tileId);
-  return key;
+  return info.key;
+}
+
+function renderTilePowerUp(tileEl, key, remaining) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tile-powerup';
+  const icon = document.createElement('i');
+  icon.className = `hgi hgi-stroke hgi-rounded ${POWER_UP_ICONS[key]}`;
+  const countEl = document.createElement('span');
+  countEl.className = 'tile-powerup-count';
+  countEl.textContent = remaining;
+  wrap.appendChild(icon);
+  wrap.appendChild(countEl);
+  tileEl.appendChild(wrap);
 }
 
 function spawnLevelPowerUp() {
@@ -434,19 +449,35 @@ function spawnLevelPowerUp() {
   if (!ids.length) return;
   const tileId = ids[Math.floor(Math.random() * ids.length)];
   const key = POWER_UP_KEYS[Math.floor(Math.random() * POWER_UP_KEYS.length)];
-  tilePowerUps.set(tileId, key);
+  tilePowerUps.set(tileId, { key, remaining: POWER_UP_TILE_TTL });
   const tile = tiles.get(tileId);
   if (!tile) return;
-  const icon = document.createElement('i');
-  icon.className = `hgi hgi-stroke hgi-rounded ${POWER_UP_ICONS[key]} tile-powerup`;
-  tile.el.appendChild(icon);
+  renderTilePowerUp(tile.el, key, POWER_UP_TILE_TTL);
+}
+
+function decrementTilePowerUps() {
+  for (const tid of Array.from(tilePowerUps.keys())) {
+    const info = tilePowerUps.get(tid);
+    info.remaining -= 1;
+    const tile = tiles.get(tid);
+    if (info.remaining <= 0) {
+      tilePowerUps.delete(tid);
+      if (tile) {
+        const pu = tile.el.querySelector('.tile-powerup');
+        if (pu) pu.remove();
+      }
+    } else if (tile) {
+      const countEl = tile.el.querySelector('.tile-powerup-count');
+      if (countEl) countEl.textContent = info.remaining;
+    }
+  }
 }
 
 function snapshotState() {
   const puByPos = new Map();
-  for (const [tid, key] of tilePowerUps) {
+  for (const [tid, info] of tilePowerUps) {
     const t = tiles.get(tid);
-    if (t) puByPos.set(`${t.r},${t.c}`, key);
+    if (t) puByPos.set(`${t.r},${t.c}`, { key: info.key, remaining: info.remaining });
   }
   return {
     grid: cloneGrid(grid),
@@ -496,17 +527,13 @@ function doUndo() {
 
   setupBoard();
 
-  for (const [posKey, key] of snap.puByPos) {
+  for (const [posKey, info] of snap.puByPos) {
     const [r, c] = posKey.split(',').map(Number);
     const tid = tileIds[r] && tileIds[r][c];
     if (tid > 0) {
-      tilePowerUps.set(tid, key);
+      tilePowerUps.set(tid, { key: info.key, remaining: info.remaining });
       const tile = tiles.get(tid);
-      if (tile) {
-        const icon = document.createElement('i');
-        icon.className = `hgi hgi-stroke hgi-rounded ${POWER_UP_ICONS[key]} tile-powerup`;
-        tile.el.appendChild(icon);
-      }
+      if (tile) renderTilePowerUp(tile.el, info.key, info.remaining);
     }
   }
 
@@ -579,6 +606,7 @@ async function doRotate(key) {
 
   powerUps[key] -= 1;
   moves++;
+  decrementTilePowerUps();
   updateStatus();
   updatePowerUpBadges();
 
@@ -623,6 +651,7 @@ async function clearTargets(targets, powerUpKey) {
   score += gained;
   powerUps[powerUpKey] -= 1;
   moves++;
+  decrementTilePowerUps();
   updateStatus();
   updatePowerUpBadges();
   maybeAnnounceRank();
@@ -796,6 +825,7 @@ boardEl.addEventListener('click', async (e) => {
   layoutTiles();
   score += gained;
   moves++;
+  decrementTilePowerUps();
   updateStatus();
   if (awarded) updatePowerUpBadges();
   maybeAnnounceRank();
