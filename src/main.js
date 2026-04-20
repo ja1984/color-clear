@@ -742,11 +742,122 @@ function showGameOver() {
   if (goLevel) goLevel.textContent = level;
   if (goScore) goScore.textContent = score;
   if (overlay) overlay.classList.add('show');
+  openLeaderboard();
 }
 
 function hideGameOver() {
   const overlay = document.getElementById('game-over');
   if (overlay) overlay.classList.remove('show');
+}
+
+// ---------- Leaderboard ----------
+const LB_NAME_KEY = 'colorClearName';
+const lbListEl = document.getElementById('lb-list');
+const lbStatusEl = document.getElementById('lb-status');
+const lbFormEl = document.getElementById('lb-submit');
+const lbNameEl = document.getElementById('lb-name');
+let lastSubmittedRun = null;
+
+function renderLeaderboard(entries) {
+  if (!lbListEl) return;
+  lbListEl.innerHTML = '';
+  if (!entries.length) {
+    lbListEl.hidden = true;
+    if (lbStatusEl) {
+      lbStatusEl.textContent = 'No scores yet — be the first.';
+      lbStatusEl.hidden = false;
+    }
+    return;
+  }
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const li = document.createElement('li');
+    if (
+      lastSubmittedRun &&
+      e.name === lastSubmittedRun.name &&
+      e.score === lastSubmittedRun.score &&
+      e.at === lastSubmittedRun.at
+    ) {
+      li.classList.add('you');
+    }
+    li.innerHTML = `<span class="rank">${i + 1}.</span><span class="name"></span><span class="score">${e.score}</span>`;
+    li.querySelector('.name').textContent = e.name;
+    lbListEl.appendChild(li);
+  }
+  lbListEl.hidden = false;
+  if (lbStatusEl) lbStatusEl.hidden = true;
+}
+
+async function fetchLeaderboard() {
+  try {
+    const res = await fetch('/api/leaderboard');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const entries = await res.json();
+    renderLeaderboard(entries);
+  } catch (err) {
+    if (lbStatusEl) {
+      lbStatusEl.textContent = 'Leaderboard unavailable.';
+      lbStatusEl.hidden = false;
+    }
+    if (lbListEl) lbListEl.hidden = true;
+  }
+}
+
+async function submitScore(name) {
+  const payload = { name, score, level };
+  if (lbStatusEl) {
+    lbStatusEl.textContent = 'Submitting…';
+    lbStatusEl.hidden = false;
+  }
+  try {
+    const res = await fetch('/api/leaderboard', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const top = Array.isArray(data.top) ? data.top : [];
+    const mine = top.find((e) => e.name === name && e.score === score);
+    if (mine) lastSubmittedRun = mine;
+    renderLeaderboard(top);
+  } catch (err) {
+    if (lbStatusEl) {
+      lbStatusEl.textContent = 'Submit failed — try again.';
+      lbStatusEl.hidden = false;
+    }
+  }
+}
+
+function openLeaderboard() {
+  lastSubmittedRun = null;
+  if (lbNameEl) {
+    lbNameEl.value = localStorage.getItem(LB_NAME_KEY) || '';
+    lbNameEl.disabled = false;
+  }
+  if (lbFormEl) {
+    const btn = lbFormEl.querySelector('button');
+    if (btn) btn.disabled = false;
+  }
+  if (lbStatusEl) {
+    lbStatusEl.textContent = 'Loading…';
+    lbStatusEl.hidden = false;
+  }
+  if (lbListEl) lbListEl.hidden = true;
+  fetchLeaderboard();
+}
+
+if (lbFormEl) {
+  lbFormEl.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = (lbNameEl.value || '').trim().slice(0, 20);
+    if (!name) return;
+    localStorage.setItem(LB_NAME_KEY, name);
+    lbNameEl.disabled = true;
+    const btn = lbFormEl.querySelector('button');
+    if (btn) btn.disabled = true;
+    await submitScore(name);
+  });
 }
 
 // ---------- New game / levels ----------
