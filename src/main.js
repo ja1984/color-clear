@@ -625,6 +625,7 @@ async function clearTargets(targets, powerUpKey) {
   moves++;
   updateStatus();
   updatePowerUpBadges();
+  maybeAnnounceRank();
 
   await wait(SLIDE_MS);
   busy = false;
@@ -797,6 +798,7 @@ boardEl.addEventListener('click', async (e) => {
   moves++;
   updateStatus();
   if (awarded) updatePowerUpBadges();
+  maybeAnnounceRank();
 
   await wait(SLIDE_MS);
   busy = false;
@@ -806,9 +808,10 @@ boardEl.addEventListener('click', async (e) => {
 
 function checkEnd() {
   if (isEmpty(grid)) {
-    gameOver = true;
     score += 100 * level;
     scoreEl.textContent = score;
+    maybeAnnounceRank();
+    gameOver = true;
     haptic.confirm();
     const nextLevel = level + 1;
     pendingLevelTimeout = setTimeout(() => {
@@ -1016,6 +1019,73 @@ if (lbNameEl) {
   lbNameEl.addEventListener('input', evaluateCanSubmit);
 }
 
+// ---------- In-game rank toast ----------
+const toastEl = document.getElementById('game-toast');
+let toastTimer = null;
+let toastHideTimer = null;
+let topScoresCache = [];
+let lastAnnouncedRank = Infinity;
+
+function showToast(msg) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.hidden = false;
+  void toastEl.offsetWidth;
+  toastEl.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  if (toastHideTimer) clearTimeout(toastHideTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove('show');
+    toastHideTimer = setTimeout(() => { toastEl.hidden = true; }, 260);
+  }, 2800);
+}
+
+async function refreshTopScoresCache() {
+  try {
+    const res = await fetch('/api/leaderboard');
+    if (!res.ok) return;
+    const entries = await res.json();
+    topScoresCache = entries
+      .map((e) => Number(e.score) || 0)
+      .sort((a, b) => b - a);
+  } catch {}
+}
+
+function rankForScore(s) {
+  if (s <= 0) return null;
+  const list = topScoresCache.slice(0, 10);
+  let rank = 1;
+  for (const v of list) {
+    if (s > v) return rank;
+    rank++;
+  }
+  return rank <= 10 ? rank : null;
+}
+
+function ordinal(n) {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return n + 'th';
+  switch (n % 10) {
+    case 1: return n + 'st';
+    case 2: return n + 'nd';
+    case 3: return n + 'rd';
+    default: return n + 'th';
+  }
+}
+
+function maybeAnnounceRank() {
+  if (gameOver) return;
+  const r = rankForScore(score);
+  if (r === null) return;
+  if (r >= lastAnnouncedRank) return;
+  lastAnnouncedRank = r;
+  showToast(`You reached ${ordinal(r)} on the leaderboard!`);
+}
+
+// Console helpers for local testing.
+window.debugToast = (msg = 'Test toast') => showToast(msg);
+window.debugRank = (rank = 10) => showToast(`You reached ${ordinal(rank)} on the leaderboard!`);
+
 // ---------- New game / levels ----------
 function startLevel(lvl, keepScore = false) {
   level = Math.max(1, lvl);
@@ -1044,6 +1114,8 @@ function newGame() {
   powerUps = { ...STARTING_POWER_UPS };
   activePowerUp = null;
   tilePowerUps.clear();
+  lastAnnouncedRank = Infinity;
+  refreshTopScoresCache();
   hideGameOver();
   startLevel(1, false);
 }
