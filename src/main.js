@@ -367,6 +367,8 @@ function setupBoard() {
       el.style.setProperty('--shadow', `0 ${SHADOW_DEPTH}px 0 ${SHADOW_PALETTE[v]}`);
       el.style.setProperty('--tile-color', `${PALETTE[v]}`);
       el.dataset.id = id;
+      el.dataset.color = v;
+      if (easterColor !== null && v === easterColor) el.dataset.andreaMatch = '';
       positionCell(el, r, c);
       boardEl.appendChild(el);
       tiles.set(id, { el, r, c });
@@ -1111,6 +1113,42 @@ function maybeAnnounceRank() {
   lastAnnouncedRank = r;
   showToast(`You reached ${ordinal(r)} on the leaderboard!`);
 }
+
+// ---------- Easter egg ----------
+const EASTER_CODE = 'andrea';
+let easterBuffer = '';
+let easterColor = null;
+
+function applyEasterMatches() {
+  for (const { el } of tiles.values()) {
+    const color = Number(el.dataset.color);
+    if (easterColor !== null && color === easterColor) {
+      el.dataset.andreaMatch = '';
+    } else {
+      delete el.dataset.andreaMatch;
+    }
+  }
+}
+
+window.addEventListener('keydown', (e) => {
+  if (!/^[a-zA-Z]$/.test(e.key)) return;
+  easterBuffer = (easterBuffer + e.key.toLowerCase()).slice(-EASTER_CODE.length);
+  if (easterBuffer !== EASTER_CODE) return;
+  if (easterColor === null) {
+    const presentColors = new Set();
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++)
+        if (grid[r][c] >= 0) presentColors.add(grid[r][c]);
+    const pool = Array.from(presentColors);
+    if (!pool.length) return;
+    easterColor = pool[Math.floor(Math.random() * pool.length)];
+    showToast('Hi Andrea');
+  } else {
+    easterColor = null;
+    showToast('Bye Andrea');
+  }
+  applyEasterMatches();
+});
 
 // Console helpers for local testing.
 window.debugToast = (msg = 'Test toast') => showToast(msg);
