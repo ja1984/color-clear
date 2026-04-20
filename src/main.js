@@ -25,7 +25,7 @@ let hoverGroup = new Set();
 let gameOver = false;
 let busy = false;
 
-const STARTING_POWER_UPS = { rotateCW: 0, rotateCCW: 0, clearRow: 0, clearCol: 0, bomb: 0, hint: 3 };
+const STARTING_POWER_UPS = { rotateCW: 0, rotateCCW: 0, clearRow: 0, clearCol: 0, bomb: 0, undo: 0, hint: 3 };
 let powerUps = { ...STARTING_POWER_UPS };
 let activePowerUp = null;
 
@@ -35,10 +35,15 @@ const POWER_UP_ICONS = {
   clearRow: 'hgi-arrow-horizontal',
   clearCol: 'hgi-arrow-vertical',
   bomb: 'hgi-bomb',
+  undo: 'hgi-arrow-turn-backward',
   hint: 'hgi-idea-01',
 };
 const POWER_UP_KEYS = Object.keys(POWER_UP_ICONS);
 let tilePowerUps = new Map(); // tileId -> powerUpKey
+
+const UNDO_STACK_MAX = 50;
+let undoStack = [];
+let pendingLevelTimeout = null;
 
 const GAP_X = 7;
 const GAP_Y = 11;
@@ -395,6 +400,7 @@ function updatePowerUpBadges() {
     clearRow: document.getElementById('pu-clear-row'),
     clearCol: document.getElementById('pu-clear-col'),
     bomb: document.getElementById('pu-bomb'),
+    undo: document.getElementById('pu-undo'),
     hint: document.getElementById('hint'),
   };
   for (const key of Object.keys(map)) {
@@ -403,7 +409,13 @@ function updatePowerUpBadges() {
     const amount = powerUps[key];
     const badge = btn.querySelector('.badge');
     if (badge) badge.textContent = amount;
-    btn.disabled = amount <= 0 || busy || gameOver;
+    let disabled = amount <= 0 || busy;
+    if (key === 'undo') {
+      disabled = disabled || undoStack.length === 0;
+    } else {
+      disabled = disabled || gameOver;
+    }
+    btn.disabled = disabled;
     btn.classList.toggle('active', activePowerUp === key);
   }
   boardEl.classList.toggle('line-mode', activePowerUp === 'clearRow' || activePowerUp === 'clearCol');
@@ -428,6 +440,78 @@ function spawnLevelPowerUp() {
   const icon = document.createElement('i');
   icon.className = `hgi hgi-stroke hgi-rounded ${POWER_UP_ICONS[key]} tile-powerup`;
   tile.el.appendChild(icon);
+}
+
+function snapshotState() {
+  const puByPos = new Map();
+  for (const [tid, key] of tilePowerUps) {
+    const t = tiles.get(tid);
+    if (t) puByPos.set(`${t.r},${t.c}`, key);
+  }
+  return {
+    grid: cloneGrid(grid),
+    rows, cols, numColors,
+    score, moves, level,
+    powerUps: { ...powerUps },
+    puByPos,
+  };
+}
+
+function pushSnapshot() {
+  undoStack.push(snapshotState());
+  if (undoStack.length > UNDO_STACK_MAX) undoStack.shift();
+}
+
+function clearUndoStack() {
+  undoStack.length = 0;
+}
+
+function doUndo() {
+  if (busy) return;
+  if (powerUps.undo <= 0) return;
+  if (undoStack.length === 0) return;
+  haptic.confirm();
+
+  if (pendingLevelTimeout !== null) {
+    clearTimeout(pendingLevelTimeout);
+    pendingLevelTimeout = null;
+  }
+
+  const snap = undoStack.pop();
+  const newUndoCount = Math.max(0, powerUps.undo - 1);
+
+  rows = snap.rows;
+  cols = snap.cols;
+  numColors = snap.numColors;
+  grid = cloneGrid(snap.grid);
+  score = snap.score;
+  moves = snap.moves;
+  level = snap.level;
+  powerUps = { ...snap.powerUps, undo: newUndoCount };
+  activePowerUp = null;
+  tilePowerUps.clear();
+  hoverGroup = new Set();
+  gameOver = false;
+  hideGameOver();
+
+  setupBoard();
+
+  for (const [posKey, key] of snap.puByPos) {
+    const [r, c] = posKey.split(',').map(Number);
+    const tid = tileIds[r] && tileIds[r][c];
+    if (tid > 0) {
+      tilePowerUps.set(tid, key);
+      const tile = tiles.get(tid);
+      if (tile) {
+        const icon = document.createElement('i');
+        icon.className = `hgi hgi-stroke hgi-rounded ${POWER_UP_ICONS[key]} tile-powerup`;
+        tile.el.appendChild(icon);
+      }
+    }
+  }
+
+  updateStatus();
+  updatePowerUpBadges();
 }
 
 function rebuildSlots() {
@@ -460,6 +544,7 @@ async function doRotate(key) {
   if (busy || gameOver) return;
   if (powerUps[key] <= 0) return;
   haptic.confirm();
+  pushSnapshot();
   busy = true;
   activePowerUp = null;
   hoverGroup = new Set();
@@ -506,12 +591,13 @@ async function doRotate(key) {
 async function clearTargets(targets, powerUpKey) {
   if (!targets.length) return;
   haptic.confirm();
+  pushSnapshot();
   busy = true;
   activePowerUp = null;
   hoverGroup = new Set();
   updateHoverClasses();
 
-  const gained = targets.length * (targets.length - 1);
+  const gained = targets.length * (targets.length - 1) * level;
   spawnScorePop(targets, gained);
 
   for (const [r, c] of targets) {
@@ -675,11 +761,12 @@ boardEl.addEventListener('click', async (e) => {
   if (group.length < 2) return;
 
   haptic();
+  pushSnapshot();
   busy = true;
   hoverGroup = new Set();
   updateHoverClasses();
 
-  const gained = group.length * (group.length - 1);
+  const gained = group.length * (group.length - 1) * level;
   spawnScorePop(group, gained);
 
   // Fade out the cleared tiles.
@@ -720,11 +807,14 @@ boardEl.addEventListener('click', async (e) => {
 function checkEnd() {
   if (isEmpty(grid)) {
     gameOver = true;
-    score += 100;
+    score += 100 * level;
     scoreEl.textContent = score;
     haptic.confirm();
     const nextLevel = level + 1;
-    setTimeout(() => startLevel(nextLevel, /*keepScore*/ true), 300);
+    pendingLevelTimeout = setTimeout(() => {
+      pendingLevelTimeout = null;
+      startLevel(nextLevel, /*keepScore*/ true);
+    }, 300);
     return;
   }
   const groups = findAllGroups(grid);
@@ -739,10 +829,30 @@ function showGameOver() {
   const overlay = document.getElementById('game-over');
   const goLevel = document.getElementById('go-level');
   const goScore = document.getElementById('go-score');
+  const continueBtn = document.getElementById('go-continue');
+  const restartBtn = document.getElementById('go-restart');
   if (goLevel) goLevel.textContent = level;
   if (goScore) goScore.textContent = score;
+
+  const usable =
+    powerUps.rotateCW +
+    powerUps.rotateCCW +
+    powerUps.clearRow +
+    powerUps.clearCol +
+    powerUps.bomb +
+    powerUps.undo;
+  if (continueBtn) continueBtn.hidden = usable <= 0;
+  if (restartBtn) restartBtn.classList.toggle('secondary', usable > 0);
+
   if (overlay) overlay.classList.add('show');
   openLeaderboard();
+}
+
+function doContinue() {
+  gameOver = false;
+  hideGameOver();
+  haptic();
+  updatePowerUpBadges();
 }
 
 function hideGameOver() {
@@ -756,7 +866,42 @@ const lbListEl = document.getElementById('lb-list');
 const lbStatusEl = document.getElementById('lb-status');
 const lbFormEl = document.getElementById('lb-submit');
 const lbNameEl = document.getElementById('lb-name');
+const lbSubmitBtn = lbFormEl ? lbFormEl.querySelector('button') : null;
 let lastSubmittedRun = null;
+let currentTop = [];
+let boardLoaded = false;
+
+function topScore() {
+  let best = null;
+  for (const e of currentTop) {
+    if (best === null || e.score > best) best = e.score;
+  }
+  return best;
+}
+
+function evaluateCanSubmit() {
+  if (!lbSubmitBtn || !lbNameEl) return;
+  if (!boardLoaded) {
+    lbSubmitBtn.disabled = true;
+    return;
+  }
+  const name = (lbNameEl.value || '').trim();
+  if (!name) {
+    lbSubmitBtn.disabled = true;
+    return;
+  }
+  const best = topScore();
+  if (best !== null && score <= best) {
+    lbSubmitBtn.disabled = true;
+    if (lbStatusEl) {
+      lbStatusEl.textContent = `High score is ${best} — beat it to submit.`;
+      lbStatusEl.hidden = false;
+    }
+  } else {
+    lbSubmitBtn.disabled = false;
+    if (lbStatusEl && currentTop.length) lbStatusEl.hidden = true;
+  }
+}
 
 function renderLeaderboard(entries) {
   if (!lbListEl) return;
@@ -780,7 +925,7 @@ function renderLeaderboard(entries) {
     ) {
       li.classList.add('you');
     }
-    li.innerHTML = `<span class="rank">${i + 1}.</span><span class="name"></span><span class="score">${e.score}</span>`;
+    li.innerHTML = `<span class="rank">${i + 1}.</span><span class="name"></span><span class="level">Lvl ${e.level ?? 1}</span><span class="score">${e.score}</span>`;
     li.querySelector('.name').textContent = e.name;
     lbListEl.appendChild(li);
   }
@@ -793,13 +938,19 @@ async function fetchLeaderboard() {
     const res = await fetch('/api/leaderboard');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const entries = await res.json();
+    currentTop = entries;
+    boardLoaded = true;
     renderLeaderboard(entries);
+    evaluateCanSubmit();
   } catch (err) {
+    currentTop = [];
+    boardLoaded = false;
     if (lbStatusEl) {
       lbStatusEl.textContent = 'Leaderboard unavailable.';
       lbStatusEl.hidden = false;
     }
     if (lbListEl) lbListEl.hidden = true;
+    if (lbSubmitBtn) lbSubmitBtn.disabled = true;
   }
 }
 
@@ -818,6 +969,7 @@ async function submitScore(name) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const top = Array.isArray(data.top) ? data.top : [];
+    currentTop = top;
     const mine = top.find((e) => e.name === name && e.score === score);
     if (mine) lastSubmittedRun = mine;
     renderLeaderboard(top);
@@ -831,14 +983,13 @@ async function submitScore(name) {
 
 function openLeaderboard() {
   lastSubmittedRun = null;
+  currentTop = [];
+  boardLoaded = false;
   if (lbNameEl) {
     lbNameEl.value = localStorage.getItem(LB_NAME_KEY) || '';
     lbNameEl.disabled = false;
   }
-  if (lbFormEl) {
-    const btn = lbFormEl.querySelector('button');
-    if (btn) btn.disabled = false;
-  }
+  if (lbSubmitBtn) lbSubmitBtn.disabled = true;
   if (lbStatusEl) {
     lbStatusEl.textContent = 'Loading…';
     lbStatusEl.hidden = false;
@@ -852,12 +1003,17 @@ if (lbFormEl) {
     e.preventDefault();
     const name = (lbNameEl.value || '').trim().slice(0, 20);
     if (!name) return;
+    const best = topScore();
+    if (best !== null && score <= best) return;
     localStorage.setItem(LB_NAME_KEY, name);
     lbNameEl.disabled = true;
-    const btn = lbFormEl.querySelector('button');
-    if (btn) btn.disabled = true;
+    if (lbSubmitBtn) lbSubmitBtn.disabled = true;
     await submitScore(name);
   });
+}
+
+if (lbNameEl) {
+  lbNameEl.addEventListener('input', evaluateCanSubmit);
 }
 
 // ---------- New game / levels ----------
@@ -876,6 +1032,7 @@ function startLevel(lvl, keepScore = false) {
     busy = false;
     hoverGroup = new Set();
     tilePowerUps.clear();
+    clearUndoStack();
     setupBoard();
     if (level % 2 === 1) spawnLevelPowerUp();
     updateStatus();
@@ -892,6 +1049,7 @@ function newGame() {
 }
 
 document.getElementById('go-restart').addEventListener('click', newGame);
+document.getElementById('go-continue').addEventListener('click', doContinue);
 document.getElementById('pu-rotate-cw').addEventListener('click', () => doRotate('rotateCW'));
 document.getElementById('pu-rotate-ccw').addEventListener('click', () => doRotate('rotateCCW'));
 function togglePowerUp(key) {
@@ -904,6 +1062,7 @@ function togglePowerUp(key) {
 document.getElementById('pu-bomb').addEventListener('click', () => togglePowerUp('bomb'));
 document.getElementById('pu-clear-row').addEventListener('click', () => togglePowerUp('clearRow'));
 document.getElementById('pu-clear-col').addEventListener('click', () => togglePowerUp('clearCol'));
+document.getElementById('pu-undo').addEventListener('click', doUndo);
 document.getElementById('hint').addEventListener('click', () => {
   if (busy || gameOver) return;
   if (powerUps.hint <= 0) return;

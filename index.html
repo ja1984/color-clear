@@ -61,7 +61,6 @@
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 10px;
-      overflow: hidden;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -73,6 +72,7 @@
       background: rgba(17, 20, 27, 0.85);
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
+      border-radius: 10px;
       display: none;
       align-items: center;
       justify-content: center;
@@ -115,6 +115,18 @@
       font-size: 14px;
     }
 
+    .game-over-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .game-over-actions .go-action-btn {
+      width: 100%;
+      padding: 10px 16px;
+      font-size: 14px;
+    }
+
     .leaderboard {
       margin-top: 20px;
       text-align: left;
@@ -152,16 +164,25 @@
       gap: 4px;
       max-height: 220px;
       overflow-y: auto;
+      scrollbar-color: var(--ft-my-rewards-scrollbar-color, rgba(0, 0, 0, 0.2)) transparent;
+      scrollbar-width: thin;
     }
 
     .leaderboard-list li {
       display: grid;
-      grid-template-columns: 24px 1fr auto;
+      grid-template-columns: 24px 1fr auto auto;
       gap: 10px;
       align-items: baseline;
       font-size: 13px;
       padding: 4px 0;
       border-bottom: 1px solid var(--border);
+    }
+
+    .leaderboard-list .level {
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.3px;
     }
 
     .leaderboard-list li:last-child {
@@ -378,6 +399,35 @@
       line-height: 1;
     }
 
+    .power-up[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      max-width: 220px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease;
+      z-index: 20;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .power-up[data-tooltip]:hover::after,
+    .power-up[data-tooltip]:focus-visible::after {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
     .score-pop {
       position: absolute;
       pointer-events: none;
@@ -460,8 +510,15 @@
     }
 
     @keyframes pulseHint {
-      0%, 100% { background: var(--tile-color); }
-      50%      { background: color-mix(in srgb, var(--tile-color), white 40%); }
+
+      0%,
+      100% {
+        background: var(--tile-color);
+      }
+
+      50% {
+        background: color-mix(in srgb, var(--tile-color), white 40%);
+      }
     }
 
     .cell.pulse::before {
@@ -489,7 +546,6 @@
       pointer-events: none;
       transition: transform 180ms ease, opacity 180ms ease;
     }
-
   </style>
 </head>
 
@@ -513,28 +569,35 @@
         <p class="small-header">Power ups</p>
         <div class="power-ups-row">
           <div class="power-up-slots">
-            <button class="power-up" id="pu-rotate-cw" aria-label="Rotate clockwise">
+            <button class="power-up" id="pu-rotate-cw" aria-label="Rotate clockwise"
+              data-tooltip="Rotate the board clockwise">
               <i class="hgi hgi-stroke hgi-rounded hgi-rotate-clockwise"></i>
               <span class="badge">0</span>
             </button>
-            <button class="power-up" id="pu-rotate-ccw" aria-label="Rotate counter-clockwise">
+            <button class="power-up" id="pu-rotate-ccw" aria-label="Rotate counter-clockwise"
+              data-tooltip="Rotate the board counter-clockwise">
               <i class="hgi hgi-stroke hgi-rounded hgi-rotate-02"></i>
               <span class="badge">0</span>
             </button>
-            <button class="power-up" id="pu-clear-row" aria-label="Clear row">
+            <button class="power-up" id="pu-clear-row" aria-label="Clear row" data-tooltip="Clear an entire row">
               <i class="hgi hgi-stroke hgi-rounded hgi-arrow-horizontal"></i>
               <span class="badge">0</span>
             </button>
-            <button class="power-up" id="pu-clear-col" aria-label="Clear column">
+            <button class="power-up" id="pu-clear-col" aria-label="Clear column" data-tooltip="Clear an entire column">
               <i class="hgi hgi-stroke hgi-rounded hgi-arrow-vertical"></i>
               <span class="badge">0</span>
             </button>
-            <button class="power-up" id="pu-bomb" aria-label="Bomb same color">
+            <button class="power-up" id="pu-bomb" aria-label="Bomb same color"
+              data-tooltip="Clear every tile of the tapped color">
               <i class="hgi hgi-stroke hgi-rounded hgi-bomb"></i>
               <span class="badge">0</span>
             </button>
+            <button class="power-up" id="pu-undo" aria-label="Undo last action" data-tooltip="Undo your last move">
+              <i class="hgi hgi-stroke hgi-rounded hgi-arrow-turn-backward"></i>
+              <span class="badge">0</span>
+            </button>
           </div>
-          <button id="hint" class="power-up hint" aria-label="Hint">
+          <button id="hint" class="power-up hint" aria-label="Hint" data-tooltip="Highlight the largest group">
             <i class="hgi hgi-stroke hgi-rounded hgi-idea-01"></i>
             <span class="badge">0</span>
           </button>
@@ -548,7 +611,10 @@
             <div class="stat"><span>Level</span><b id="go-level">1</b></div>
             <div class="stat"><span>Score</span><b id="go-score">0</b></div>
           </div>
-          <button id="go-restart" class="go-restart-btn">Restart</button>
+          <div class="game-over-actions">
+            <button id="go-continue" class="go-action-btn" hidden>Continue</button>
+            <button id="go-restart" class="go-action-btn">Restart</button>
+          </div>
 
           <div class="leaderboard">
             <p class="small-header">Global Leaderboard</p>
