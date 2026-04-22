@@ -537,7 +537,7 @@ function updatePowerUpBadges() {
     btn.disabled = disabled;
     btn.classList.toggle('active', activePowerUp === key);
   }
-  boardEl.classList.toggle('line-mode', activePowerUp === 'clearRow' || activePowerUp === 'clearCol');
+  boardEl.classList.toggle('line-mode', activePowerUp === 'clearRow' || activePowerUp === 'clearCol' || activePowerUp === 'bomb');
 }
 
 function awardPowerUpFromTile(tileId) {
@@ -864,6 +864,13 @@ boardEl.addEventListener('mousemove', (e) => {
     for (let rr = 0; rr < rows; rr++) {
       if (tileIds[rr][t.c] > 0) next.add(rr * cols + t.c);
     }
+  } else if (activePowerUp === 'bomb') {
+    const color = grid[t.r][t.c];
+    for (let rr = 0; rr < rows; rr++) {
+      for (let cc = 0; cc < cols; cc++) {
+        if (tileIds[rr][cc] > 0 && grid[rr][cc] === color) next.add(rr * cols + cc);
+      }
+    }
   } else {
     const group = findGroup(grid, t.r, t.c);
     if (group.length >= 2) group.forEach(([gr, gc]) => next.add(gr * cols + gc));
@@ -1022,6 +1029,10 @@ const lbStatusEl = document.getElementById('lb-status');
 const lbFormEl = document.getElementById('lb-submit');
 const lbNameEl = document.getElementById('lb-name');
 const lbSubmitBtn = lbFormEl ? lbFormEl.querySelector('button') : null;
+const lbMainListEl = document.getElementById('lb-main-list');
+const lbMainStatusEl = document.getElementById('lb-main-status');
+const lbPanelEl = document.getElementById('lb-panel');
+const lbCloseEl = document.getElementById('lb-close');
 let lastSubmittedRun = null;
 let currentTop = [];
 let boardLoaded = false;
@@ -1058,14 +1069,14 @@ function evaluateCanSubmit() {
   }
 }
 
-function renderLeaderboard(entries) {
-  if (!lbListEl) return;
-  lbListEl.innerHTML = '';
+function renderLeaderboardInto(listEl, statusEl, entries) {
+  if (!listEl) return;
+  listEl.innerHTML = '';
   if (!entries.length) {
-    lbListEl.hidden = true;
-    if (lbStatusEl) {
-      lbStatusEl.textContent = 'No scores yet — be the first.';
-      lbStatusEl.hidden = false;
+    listEl.hidden = true;
+    if (statusEl) {
+      statusEl.textContent = 'No scores yet — be the first.';
+      statusEl.hidden = false;
     }
     return;
   }
@@ -1082,10 +1093,15 @@ function renderLeaderboard(entries) {
     }
     li.innerHTML = `<span class="rank">${i + 1}.</span><span class="name"></span><span class="level">Lvl ${e.level ?? 1}</span><span class="score">${e.score}</span>`;
     li.querySelector('.name').textContent = e.name;
-    lbListEl.appendChild(li);
+    listEl.appendChild(li);
   }
-  lbListEl.hidden = false;
-  if (lbStatusEl) lbStatusEl.hidden = true;
+  listEl.hidden = false;
+  if (statusEl) statusEl.hidden = true;
+}
+
+function renderLeaderboard(entries) {
+  renderLeaderboardInto(lbListEl, lbStatusEl, entries);
+  renderLeaderboardInto(lbMainListEl, lbMainStatusEl, entries);
 }
 
 async function fetchLeaderboard() {
@@ -1105,6 +1121,11 @@ async function fetchLeaderboard() {
       lbStatusEl.hidden = false;
     }
     if (lbListEl) lbListEl.hidden = true;
+    if (lbMainStatusEl) {
+      lbMainStatusEl.textContent = 'Leaderboard unavailable.';
+      lbMainStatusEl.hidden = false;
+    }
+    if (lbMainListEl) lbMainListEl.hidden = true;
     if (lbSubmitBtn) lbSubmitBtn.disabled = true;
   }
 }
@@ -1170,6 +1191,14 @@ if (lbFormEl) {
 if (lbNameEl) {
   lbNameEl.addEventListener('input', evaluateCanSubmit);
 }
+
+if (lbCloseEl && lbPanelEl) {
+  lbCloseEl.addEventListener('click', () => {
+    lbPanelEl.classList.add('closed');
+  });
+}
+
+fetchLeaderboard();
 
 // ---------- In-game rank toast ----------
 const toastEl = document.getElementById('game-toast');

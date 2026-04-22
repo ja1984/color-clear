@@ -666,6 +666,47 @@
     .board.andrea-mode .cell:hover::before {
       background-position: right bottom;
     }
+
+    .leaderboard-panel {
+      display: none;
+      padding: 14px 16px 16px;
+    }
+
+    @media (min-width: 640px) {
+      .leaderboard-panel:not(.closed) {
+        display: block;
+      }
+    }
+
+    .leaderboard-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .leaderboard-panel-header .small-header {
+      margin: 0;
+    }
+
+    .lb-close {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      padding: 2px 4px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+
+    .lb-close:hover {
+      color: var(--text);
+    }
   </style>
 </head>
 
@@ -751,6 +792,17 @@
         </div>
       </div>
     </div>
+
+    <aside id="lb-panel" class="panel leaderboard-panel">
+      <div class="leaderboard-panel-header">
+        <p class="small-header">Global Leaderboard</p>
+        <button id="lb-close" class="lb-close" aria-label="Close leaderboard">
+          <i class="hgi hgi-stroke hgi-rounded hgi-cancel-01"></i>
+        </button>
+      </div>
+      <div id="lb-main-status" class="leaderboard-status">Loading…</div>
+      <ol id="lb-main-list" class="leaderboard-list" hidden></ol>
+    </aside>
 
   </div>
 
